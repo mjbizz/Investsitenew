@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 // Load Charlotte zip polygons once
 let ncZipData = null;
@@ -19,47 +19,44 @@ async function fetchZipGeoJson(zip) {
 }
 
 export default function ZipCodeBar({ selectedZips, setSelectedZips, zipInput, setZipInput }) {
+  const [showDropdown, setShowDropdown] = useState(false);
+
   return (
-    <div className="zip-search-bar">
-      <form
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const zip = zipInput.trim();
-          if (!zip || selectedZips.some(z => z.zip === zip)) return;
-          let geojson = null;
-          try {
-            geojson = await fetchZipGeoJson(zip);
-          } catch (err) {
-            console.error('Error fetching zip geojson:', err);
-          }
-          // Only mark as notfound if geojson is null (no bbox at all)
-          setSelectedZips(zips => [...zips, { zip, geojson, notfound: geojson === null }]);
-          setZipInput("");
-        }}
-        autoComplete="off"
-      >
-        <input
-          type="text"
-          placeholder="Add zip code"
-          value={zipInput}
-          onChange={e => setZipInput(e.target.value.replace(/[^\d]/g, "").slice(0, 10))}
-          className="zip-input-compact"
-          style={{ width: 90 }}
-        />
-      </form>
-      <div className="zip-chips">
-        {selectedZips.map(({ zip, notfound }) => (
-          <span className={"zip-chip" + (notfound ? " zip-chip-notfound" : "")} key={zip}>
-            {zip}{notfound ? <span style={{color:'#e11d48',marginLeft:3}} title="Boundary not found">!</span> : null}
-            <button
-              type="button"
-              className="zip-chip-x"
-              onClick={() => setSelectedZips(zips => zips.filter(z => z.zip !== zip))}
-              aria-label={`Remove ${zip}`}
-            >×</button>
-          </span>
-        ))}
+    <>
+      {/* Row 2: Zip code input + results */}
+      <div className="search-row-2">
+        <div className="zip-input-section">
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const zip = zipInput.trim();
+              if (!zip || selectedZips.some(z => (typeof z === 'string' ? z : z.zip) === zip)) return;
+              let geojson = null;
+              try {
+                geojson = await fetchZipGeoJson(zip);
+              } catch (err) {
+                console.error('Error fetching zip geojson:', err);
+              }
+              // Only mark as notfound if geojson is null (no bbox at all)
+              setSelectedZips(zips => [...zips, { zip, geojson, notfound: geojson === null }]);
+              setZipInput("");
+            }}
+            autoComplete="off"
+          >
+            <input
+              type="text"
+              placeholder="Add zip code"
+              value={zipInput}
+              onChange={e => setZipInput(e.target.value.replace(/[^\d]/g, "").slice(0, 10))}
+              className="zip-input-field"
+            />
+          </form>
+        </div>
+        
+        <div className="zip-results-section">
+          {/* Zip results now handled in App.js */}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

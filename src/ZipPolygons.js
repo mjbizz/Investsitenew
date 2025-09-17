@@ -4,9 +4,14 @@ import { GeoJSON, useMap } from "react-leaflet";
 export default function ZipPolygons({ selectedZips }) {
   const map = useMap();
 
+  // Convert selectedZips to objects if they're strings
+  const zipObjects = selectedZips.map(z => 
+    typeof z === 'string' ? { zip: z, geojson: null, notfound: true } : z
+  );
+
   // Fit bounds to all zip polygons when they change
   useEffect(() => {
-    const allBounds = selectedZips
+    const allBounds = zipObjects
       .map(z => z.geojson)
       .filter(Boolean)
       .map(geojson => {
@@ -17,13 +22,13 @@ export default function ZipPolygons({ selectedZips }) {
       const flat = allBounds.flat();
       map.fitBounds(flat);
     }
-  }, [selectedZips, map]);
+  }, [zipObjects, map]);
 
   return (
     <>
-      {selectedZips.map(({ zip, geojson }) =>
+      {zipObjects.map(({ zip, geojson }) =>
         geojson ? (
-          <GeoJSON key={zip} data={geojson} style={{ color: '#7c3aed', weight: 2, fillOpacity: 0.18 }} />
+          <GeoJSON key={zip} data={geojson} style={{ color: '#3b82f6', weight: 2, fillOpacity: 0.2 }} />
         ) : null
       )}
     </>

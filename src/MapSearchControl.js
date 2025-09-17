@@ -1,9 +1,12 @@
 import { useEffect } from "react";
+import { useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet-control-geocoder/dist/Control.Geocoder.css";
 import "leaflet-control-geocoder";
 
-export default function MapSearchControl({ map }) {
+export default function MapSearchControl() {
+  const map = useMapEvents({});
+  
   useEffect(() => {
     if (!map) return;
     if (!L.Control.Geocoder) return;
@@ -11,6 +14,10 @@ export default function MapSearchControl({ map }) {
       defaultMarkGeocode: false,
       placeholder: "Search location...",
       geocoder: L.Control.Geocoder.nominatim(),
+      suggestMinLength: 3,
+      suggestTimeout: 250,
+      queryMinLength: 1,
+      position: 'topleft'
     })
       .on("markgeocode", function (e) {
         const bbox = e.geocode.bbox;
