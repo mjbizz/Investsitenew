@@ -58,6 +58,9 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing }) {
     // Store drawn items globally for clear button access
     window.drawnItems = items;
     
+    let isDrawing = false;
+    let currentPolyline = null;
+    
     const handleDrawCreated = async (e) => {
       items.clearLayers();
       items.addLayer(e.layer);
@@ -79,10 +82,83 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing }) {
       }
     };
     
+    // Custom freehand drawing handlers
+    const handleMouseDown = (e) => {
+      if (!window.freehandDrawing) return;
+      
+      isDrawing = true;
+      items.clearLayers();
+      
+      currentPolyline = L.polyline([e.latlng], {
+        color: '#3388ff',
+        weight: 4,
+        opacity: 0.8
+      }).addTo(items);
+    };
+    
+    const handleMouseMove = (e) => {
+      if (!window.freehandDrawing || !isDrawing || !currentPolyline) return;
+      
+      currentPolyline.addLatLng(e.latlng);
+    };
+    
+    const handleMouseUp = async (e) => {
+      if (!window.freehandDrawing || !isDrawing || !currentPolyline) return;
+      
+      isDrawing = false;
+      window.freehandDrawing = false;
+      map.dragging.enable();
+      map.getContainer().style.cursor = '';
+      
+      // Convert polyline to polygon for zip code detection
+      const latlngs = currentPolyline.getLatLngs();
+      if (latlngs.length > 2) {
+        // Close the polygon by adding the first point at the end
+        latlngs.push(latlngs[0]);
+        
+        // Create a polygon from the polyline
+        const polygon = L.polygon(latlngs, {
+          color: '#3388ff',
+          weight: 4,
+          opacity: 0.5,
+          fill: true,
+          fillOpacity: 0.2
+        });
+        
+        items.clearLayers();
+        items.addLayer(polygon);
+        
+        const geoJson = polygon.toGeoJSON();
+        if (onBoundaryDrawn) onBoundaryDrawn(geoJson);
+        
+        // Find intersecting zip codes
+        try {
+          console.log('Drawn freehand polygon GeoJSON:', geoJson);
+          const intersectingZips = await findIntersectingZipCodes(geoJson);
+          console.log('Found intersecting zip codes:', intersectingZips);
+          if (intersectingZips.length > 0 && onZipCodesFound) {
+            onZipCodesFound(intersectingZips);
+          } else {
+            console.log('No intersecting zip codes found');
+          }
+        } catch (error) {
+          console.error('Error finding intersecting zip codes:', error);
+        }
+      }
+      
+      currentPolyline = null;
+    };
+    
     map.on(L.Draw.Event.CREATED, handleDrawCreated);
+    map.on('mousedown', handleMouseDown);
+    map.on('mousemove', handleMouseMove);
+    map.on('mouseup', handleMouseUp);
     
     return () => {
       map.off(L.Draw.Event.CREATED, handleDrawCreated);
+      map.off('mousedown', handleMouseDown);
+      map.off('mousemove', handleMouseMove);
+      map.off('mouseup', handleMouseUp);
       if (map.hasLayer(items)) {
         map.removeLayer(items);
       }
@@ -94,16 +170,329 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing }) {
 
 
 
+// Generate year options with specified intervals
+const generateYearOptions = () => {
+  const years = [];
+  
+  // 1900 to 2000 with 20 year intervals
+  for (let year = 1900; year <= 2000; year += 20) {
+    years.push(year.toString());
+  }
+  
+  // 2000 to 2015 with 5 year intervals
+  for (let year = 2000; year <= 2015; year += 5) {
+    if (!years.includes(year.toString())) {
+      years.push(year.toString());
+    }
+  }
+  
+  // 2015 to 2025 with 1 year intervals
+  for (let year = 2015; year <= 2025; year += 1) {
+    if (!years.includes(year.toString())) {
+      years.push(year.toString());
+    }
+  }
+  
+  return years.sort((a, b) => parseInt(a) - parseInt(b));
+};
+
+// Generate area options from 750 to 10000
+const generateAreaOptions = () => {
+  const areas = [];
+  
+  // 750 to 1000 with 50 intervals
+  for (let area = 750; area <= 1000; area += 50) {
+    areas.push(area.toString());
+  }
+  
+  // 1000 to 2000 with 100 intervals
+  for (let area = 1000; area <= 2000; area += 100) {
+    if (!areas.includes(area.toString())) {
+      areas.push(area.toString());
+    }
+  }
+  
+  // 2000 to 5000 with 250 intervals
+  for (let area = 2000; area <= 5000; area += 250) {
+    if (!areas.includes(area.toString())) {
+      areas.push(area.toString());
+    }
+  }
+  
+  // 5000 to 10000 with 500 intervals
+  for (let area = 5000; area <= 10000; area += 500) {
+    if (!areas.includes(area.toString())) {
+      areas.push(area.toString());
+    }
+  }
+  
+  return areas.sort((a, b) => parseInt(a) - parseInt(b));
+};
+
+// Custom Year Input Component
+function YearInput({ value, onChange, placeholder, style }) {
+  const [inputValue, setInputValue] = useState(value || placeholder);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [filteredOptions, setFilteredOptions] = useState([]);
+  const yearOptions = generateYearOptions();
+  
+  React.useEffect(() => {
+    if (value && value !== "") {
+      setInputValue(value);
+    } else if (!inputValue || inputValue === "") {
+      setInputValue(placeholder);
+    }
+  }, [value, placeholder]);
+  
+  React.useEffect(() => {
+    setFilteredOptions(yearOptions);
+  }, []);
+  
+  const handleInputChange = (e) => {
+    const newValue = e.target.value;
+    setInputValue(newValue);
+    setShowDropdown(true);
+    
+    // Only call onChange if it's a valid year
+    if (newValue && yearOptions.includes(newValue)) {
+      onChange(newValue);
+    } else if (newValue === "") {
+      onChange("");
+    }
+  };
+  
+  const handleOptionClick = (year) => {
+    setInputValue(year);
+    onChange(year);
+    setShowDropdown(false);
+    // Prevent blur from interfering
+    setTimeout(() => {}, 0);
+  };
+  
+  const handleFocus = () => {
+    setShowDropdown(true);
+    // Clear placeholder text when focused
+    if (inputValue === placeholder) {
+      setInputValue("");
+    }
+  };
+  
+  const handleBlur = (e) => {
+    // Don't blur if clicking on dropdown option
+    if (e.relatedTarget && e.relatedTarget.closest('.dropdown-option')) {
+      return;
+    }
+    
+    // Delay hiding dropdown to allow option clicks
+    setTimeout(() => {
+      setShowDropdown(false);
+      // Only reset if input is truly empty
+      if (!inputValue || inputValue === "") {
+        setInputValue(placeholder);
+        onChange("");
+      }
+    }, 50);
+  };
+  
+  return (
+    <div style={{ position: 'relative', ...style }}>
+      <input
+        type="text"
+        value={inputValue}
+        onChange={handleInputChange}
+        onFocus={handleFocus}
+        onClick={handleFocus}
+        onBlur={handleBlur}
+        style={{ 
+          width: style?.width || '100px', 
+          padding: '4px 8px', 
+          border: '2px solid #475569', 
+          borderRadius: '8px', 
+          fontSize: '12px', 
+          background: '#1e293b', 
+          color: inputValue === placeholder ? '#94a3b8' : '#e2e8f0',
+          cursor: 'pointer'
+        }}
+        readOnly={false}
+      />
+      {showDropdown && filteredOptions.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          backgroundColor: '#1e293b',
+          border: '2px solid #475569',
+          borderRadius: '8px',
+          maxHeight: '150px',
+          overflowY: 'auto',
+          zIndex: 1000,
+          marginTop: '2px'
+        }}>
+          {filteredOptions.map(year => (
+            <div
+              key={year}
+              className="dropdown-option"
+              onMouseDown={(e) => {
+                e.preventDefault(); // Prevent blur
+                handleOptionClick(year);
+              }}
+              style={{
+                padding: '6px 8px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                color: '#e2e8f0',
+                backgroundColor: inputValue === year ? '#475569' : 'transparent'
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#475569'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = inputValue === year ? '#475569' : 'transparent'}
+            >
+              {year}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Custom Area Input Component
+function AreaInput({ value, onChange, placeholder, style }) {
+  const [inputValue, setInputValue] = useState(value || placeholder);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [filteredOptions, setFilteredOptions] = useState([]);
+  const areaOptions = generateAreaOptions();
+  
+  React.useEffect(() => {
+    if (value && value !== "") {
+      setInputValue(value.toString());
+    } else if (!inputValue || inputValue === "") {
+      setInputValue(placeholder);
+    }
+  }, [value, placeholder]);
+  
+  React.useEffect(() => {
+    setFilteredOptions(areaOptions);
+  }, []);
+  
+  const handleInputChange = (e) => {
+    const newValue = e.target.value;
+    setInputValue(newValue);
+    setShowDropdown(true);
+    
+    // Only call onChange if it's a valid area
+    if (newValue && areaOptions.includes(newValue)) {
+      onChange(parseInt(newValue));
+    } else if (newValue === "") {
+      onChange("");
+    }
+  };
+  
+  const handleOptionClick = (area) => {
+    setInputValue(area);
+    onChange(parseInt(area));
+    setShowDropdown(false);
+  };
+  
+  const handleFocus = () => {
+    setShowDropdown(true);
+    // Clear placeholder text when focused
+    if (inputValue === placeholder) {
+      setInputValue("");
+    }
+  };
+  
+  const handleBlur = (e) => {
+    // Don't blur if clicking on dropdown option
+    if (e.relatedTarget && e.relatedTarget.closest('.dropdown-option')) {
+      return;
+    }
+    
+    // Delay hiding dropdown to allow option clicks
+    setTimeout(() => {
+      setShowDropdown(false);
+      // Only reset if input is truly empty
+      if (!inputValue || inputValue === "") {
+        setInputValue(placeholder);
+        onChange("");
+      }
+    }, 50);
+  };
+  
+  return (
+    <div style={{ position: 'relative', ...style }}>
+      <input
+        type="text"
+        value={inputValue}
+        onChange={handleInputChange}
+        onFocus={handleFocus}
+        onClick={handleFocus}
+        onBlur={handleBlur}
+        style={{ 
+          width: style?.width || '100px', 
+          padding: '4px 8px', 
+          border: '2px solid #475569', 
+          borderRadius: '8px', 
+          fontSize: '12px', 
+          background: '#1e293b', 
+          color: inputValue === placeholder ? '#94a3b8' : '#e2e8f0',
+          cursor: 'pointer'
+        }}
+        readOnly={false}
+      />
+      {showDropdown && filteredOptions.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          right: 0,
+          backgroundColor: '#1e293b',
+          border: '2px solid #475569',
+          borderRadius: '8px',
+          maxHeight: '150px',
+          overflowY: 'auto',
+          zIndex: 1000,
+          marginTop: '2px'
+        }}>
+          {filteredOptions.map(area => (
+            <div
+              key={area}
+              className="dropdown-option"
+              onMouseDown={(e) => {
+                e.preventDefault(); // Prevent blur
+                handleOptionClick(area);
+              }}
+              style={{
+                padding: '6px 8px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                color: '#e2e8f0',
+                backgroundColor: inputValue === area ? '#475569' : 'transparent'
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#475569'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = inputValue === area ? '#475569' : 'transparent'}
+            >
+              {area}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [zipInput, setZipInput] = useState("");
   const [selectedZips, setSelectedZips] = useState([]); // [{zip, geojson, bounds}]
-  const [budgetMin, setBudgetMin] = useState(100000);
-  const [budgetMax, setBudgetMax] = useState(1000000);
-  const [constructionYearMin, setConstructionYearMin] = useState("1950");
-  const [constructionYearMax, setConstructionYearMax] = useState("2024");
+  const [budgetMin, setBudgetMin] = useState("");
+  const [budgetMax, setBudgetMax] = useState("");
+  const [budgetMinInput, setBudgetMinInput] = useState("No min");
+  const [budgetMaxInput, setBudgetMaxInput] = useState("No max");
+  const [constructionYearMin, setConstructionYearMin] = useState("");
+  const [constructionYearMax, setConstructionYearMax] = useState("");
   const [bedrooms, setBedrooms] = useState("any");
-  const [houseAreaMin, setHouseAreaMin] = useState(500);
-  const [houseAreaMax, setHouseAreaMax] = useState(5000);
+  const [houseAreaMin, setHouseAreaMin] = useState("");
+  const [houseAreaMax, setHouseAreaMax] = useState("");
   const [boundary, setBoundary] = useState(null);
   const [showResults, setShowResults] = useState(false);
   const [showDetailedOptions, setShowDetailedOptions] = useState(false);
@@ -122,11 +511,11 @@ function App() {
   const handleToggleDetails = () => {
     if (showDetailedOptions) {
       // Hide details and clear inputs - let model pick best answers
-      setConstructionYearMin("1950");
-      setConstructionYearMax("2024");
+      setConstructionYearMin("");
+      setConstructionYearMax("");
       setBedrooms("any");
-      setHouseAreaMin(500);
-      setHouseAreaMax(5000);
+      setHouseAreaMin("");
+      setHouseAreaMax("");
     }
     setShowDetailedOptions(!showDetailedOptions);
   };
@@ -196,7 +585,7 @@ function App() {
                         padding: '4px 8px',
                         borderRadius: '4px',
                         fontSize: '12px',
-                        fontWeight: '500',
+                        fontWeight: 'bold',
                         textAlign: 'center',
                         width: '80px',
                         display: 'flex',
@@ -243,7 +632,7 @@ function App() {
                         padding: '4px 8px',
                         borderRadius: '4px',
                         fontSize: '12px',
-                        fontWeight: '500',
+                        fontWeight: 'bold',
                         textAlign: 'center',
                         minWidth: '60px',
                         cursor: 'pointer'
@@ -276,7 +665,7 @@ function App() {
                   backgroundColor: 'white',
                   border: '2px solid rgba(0,0,0,0.2)',
                   borderRadius: '4px',
-                  fontSize: '18px',
+                  fontSize: '16px',
                   fontWeight: 'bold',
                   cursor: 'pointer',
                   display: 'flex',
@@ -296,7 +685,7 @@ function App() {
                   backgroundColor: 'white',
                   border: '2px solid rgba(0,0,0,0.2)',
                   borderRadius: '4px',
-                  fontSize: '18px',
+                  fontSize: '16px',
                   fontWeight: 'bold',
                   cursor: 'pointer',
                   display: 'flex',
@@ -311,7 +700,10 @@ function App() {
               <button 
                 onClick={() => {
                   if (window.mapInstance) {
-                    new L.Draw.Rectangle(window.mapInstance, {}).enable();
+                    // Enable freehand drawing mode
+                    window.freehandDrawing = true;
+                    window.mapInstance.dragging.disable();
+                    window.mapInstance.getContainer().style.cursor = 'crosshair';
                   }
                 }}
                 style={{
@@ -328,81 +720,123 @@ function App() {
                   justifyContent: 'center',
                   color: '#333'
                 }}
-                title="Draw Rectangle"
-              >▢</button>
-              <button 
-                onClick={() => {
-                  if (window.mapInstance) {
-                    new L.Draw.Polygon(window.mapInstance, {}).enable();
-                  }
-                }}
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  backgroundColor: 'white',
-                  border: '2px solid rgba(0,0,0,0.2)',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#333'
-                }}
-                title="Draw Polygon"
-              >⬟</button>
-              <button 
-                onClick={handleClearDrawing}
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  backgroundColor: 'white',
-                  border: '2px solid rgba(0,0,0,0.2)',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#333'
-                }}
-                title="Clear Zip Codes"
-              >
-                ✕
-              </button>
+                title="Free Hand Draw"
+              >✏️</button>
             </div>
+            
+            {/* Clear Boundary Button - Bottom Left (only when zip codes selected) */}
+            {selectedZips.length > 0 && (
+              <div style={{ position: 'absolute', bottom: '10px', left: '10px', zIndex: 1000 }}>
+                <button 
+                  onClick={handleClearDrawing}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                  }}
+                  title="Clear selected zip codes and boundary"
+                >
+                  Clear Boundary
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <form className="prefs-form" onSubmit={handleSubmit}>
           <label>
             Budget Range:
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '2px' }}>Min:</span>
-                <input
-                  type="text"
-                  value={budgetMin.toLocaleString()}
-                  onChange={(e) => {
-                    const numValue = parseInt(e.target.value.replace(/,/g, '')) || 0;
-                    setBudgetMin(Math.min(numValue, budgetMax - 50000));
-                  }}
-                  style={{ width: '120px', padding: '4px', fontSize: '12px' }}
-                />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '2px' }}>Max:</span>
-                <input
-                  type="text"
-                  value={budgetMax.toLocaleString()}
-                  onChange={(e) => {
-                    const numValue = parseInt(e.target.value.replace(/,/g, '')) || 0;
-                    setBudgetMax(Math.max(numValue, budgetMin + 50000));
-                  }}
-                  style={{ width: '120px', padding: '4px', fontSize: '12px' }}
-                />
-              </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <input
+                type="text"
+                value={budgetMinInput}
+                onChange={(e) => {
+                  const rawValue = e.target.value;
+                  setBudgetMinInput(rawValue);
+                  
+                  // Parse the number for validation
+                  const numValue = parseInt(rawValue.replace(/[^0-9]/g, '')) || 0;
+                  if (numValue > 0) {
+                    setBudgetMin(numValue);
+                  } else if (rawValue === "") {
+                    setBudgetMin("");
+                  }
+                }}
+                onFocus={() => {
+                  if (budgetMinInput === "No min") {
+                    setBudgetMinInput("");
+                  }
+                }}
+                onBlur={() => {
+                  if (!budgetMinInput || budgetMinInput === "") {
+                    setBudgetMinInput("No min");
+                    setBudgetMin("");
+                  } else {
+                    const numValue = parseInt(budgetMinInput.replace(/[^0-9]/g, '')) || 0;
+                    if (numValue > 0) {
+                      setBudgetMin(numValue);
+                      setBudgetMinInput(numValue.toLocaleString());
+                    } else {
+                      setBudgetMinInput("No min");
+                      setBudgetMin("");
+                    }
+                  }
+                }}
+                style={{ 
+                  width: '170px', 
+                  padding: '4px', 
+                  fontSize: '12px',
+                  color: budgetMinInput === "No min" ? '#94a3b8' : '#e2e8f0'
+                }}
+              />
+              <span style={{ color: '#e2e8f0', fontSize: '12px' }}>-</span>
+              <input
+                type="text"
+                value={budgetMaxInput}
+                onChange={(e) => {
+                  const rawValue = e.target.value;
+                  setBudgetMaxInput(rawValue);
+                  
+                  // Parse the number for validation
+                  const numValue = parseInt(rawValue.replace(/[^0-9]/g, '')) || 0;
+                  if (numValue > 0) {
+                    setBudgetMax(numValue);
+                  } else if (rawValue === "") {
+                    setBudgetMax("");
+                  }
+                }}
+                onFocus={() => {
+                  if (budgetMaxInput === "No max") {
+                    setBudgetMaxInput("");
+                  }
+                }}
+                onBlur={() => {
+                  if (!budgetMaxInput || budgetMaxInput === "") {
+                    setBudgetMaxInput("No max");
+                    setBudgetMax("");
+                  } else {
+                    const numValue = parseInt(budgetMaxInput.replace(/[^0-9]/g, '')) || 0;
+                    if (numValue > 0) {
+                      setBudgetMax(numValue);
+                      setBudgetMaxInput(numValue.toLocaleString());
+                    } else {
+                      setBudgetMaxInput("No max");
+                      setBudgetMax("");
+                    }
+                  }
+                }}
+                style={{ 
+                  width: '170px', 
+                  padding: '4px', 
+                  fontSize: '12px',
+                  color: budgetMaxInput === "No max" ? '#94a3b8' : '#e2e8f0'
+                }}
+              />
             </div>
           </label>
           <label>
@@ -424,26 +858,23 @@ function App() {
           </label>
           
           {/* Toggle details button */}
-          <div style={{ margin: '20px 0 0 0' }}>
-            <button 
-              type="button"
-              onClick={handleToggleDetails}
-              style={{
-                width: '100%',
-                padding: '12px 16px',
-                backgroundColor: showDetailedOptions ? '#3b82f6' : '#475569',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                marginBottom: '0'
-              }}
-            >
-              {showDetailedOptions ? 'Use smart defaults' : 'I want to add more details'}
-            </button>
-          </div>
+          <button 
+            type="button"
+            onClick={handleToggleDetails}
+            style={{
+              width: '100%',
+              padding: '12px 16px',
+              backgroundColor: showDetailedOptions ? '#3b82f6' : '#475569',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            {showDetailedOptions ? 'Use smart defaults' : 'I want to add more details'}
+          </button>
 
           {/* Show best options button - appears when details are hidden */}
           {!showDetailedOptions && (
@@ -460,10 +891,8 @@ function App() {
                 border: 'none',
                 borderRadius: '8px',
                 fontSize: '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                margin: '0',
-                marginBottom: '20px'
+                fontWeight: 'bold',
+                cursor: 'pointer'
               }}
             >
               See my best investment options
@@ -472,53 +901,48 @@ function App() {
 
           {/* Detailed options - shown only when requested */}
           {showDetailedOptions && (
-            <div style={{ marginTop: '20px', padding: '20px', backgroundColor: '#334155', borderRadius: '8px', border: '1px solid #475569' }}>
-              <label>
-                Construction Year:
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '2px' }}>Min:</span>
-                    <select 
-                      value={constructionYearMin} 
-                      onChange={(e) => setConstructionYearMin(e.target.value)}
-                      style={{ width: '100px', padding: '4px 8px', border: '2px solid #475569', borderRadius: '8px', fontSize: '12px', background: '#1e293b', color: '#e2e8f0' }}
-                    >
-                      <option value="1900">1900</option>
-                      <option value="1920">1920</option>
-                      <option value="1940">1940</option>
-                      <option value="1950">1950</option>
-                      <option value="1960">1960</option>
-                      <option value="1970">1970</option>
-                      <option value="1980">1980</option>
-                      <option value="1990">1990</option>
-                      <option value="2000">2000</option>
-                      <option value="2010">2010</option>
-                      <option value="2020">2020</option>
-                    </select>
+            <div style={{ padding: '12px', backgroundColor: '#334155', borderRadius: '8px', border: '1px solid #475569' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <label style={{ marginBottom: '4px', fontSize: '14px', color: '#e2e8f0' }}>Construction Year:</label>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '2px' }}>Max:</span>
-                    <select 
-                      value={constructionYearMax} 
-                      onChange={(e) => setConstructionYearMax(e.target.value)}
-                      style={{ width: '100px', padding: '4px 8px', border: '2px solid #475569', borderRadius: '8px', fontSize: '12px', background: '#1e293b', color: '#e2e8f0' }}
-                    >
-                      <option value="1920">1920</option>
-                      <option value="1940">1940</option>
-                      <option value="1950">1950</option>
-                      <option value="1960">1960</option>
-                      <option value="1970">1970</option>
-                      <option value="1980">1980</option>
-                      <option value="1990">1990</option>
-                      <option value="2000">2000</option>
-                      <option value="2010">2010</option>
-                      <option value="2020">2020</option>
-                      <option value="2024">2024</option>
-                    </select>
+                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-start' }}>
+                    <YearInput
+                      value={constructionYearMin}
+                      onChange={setConstructionYearMin}
+                      placeholder="No min"
+                      style={{ width: '75px' }}
+                    />
+                    <YearInput
+                      value={constructionYearMax}
+                      onChange={setConstructionYearMax}
+                      placeholder="No max"
+                      style={{ width: '75px' }}
+                    />
                   </div>
                 </div>
-              </label>
-              <label>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <label style={{ marginBottom: '4px', fontSize: '14px', color: '#e2e8f0' }}>House Area (sq ft):</label>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
+                    <AreaInput
+                      value={houseAreaMin}
+                      onChange={setHouseAreaMin}
+                      placeholder="No min"
+                      style={{ width: '75px' }}
+                    />
+                    <AreaInput
+                      value={houseAreaMax}
+                      onChange={setHouseAreaMax}
+                      placeholder="No max"
+                      style={{ width: '75px' }}
+                    />
+                  </div>
+                </div>
+              </div>
+              <label style={{ marginTop: '16px' }}>
                 Number of Bedrooms:
                 <select value={bedrooms} onChange={(e) => setBedrooms(e.target.value)}>
                   <option value="any">Any</option>
@@ -528,39 +952,6 @@ function App() {
                   <option value="4">4 Bedrooms</option>
                   <option value="5">5+ Bedrooms</option>
                 </select>
-              </label>
-              <label>
-                House Area (sq ft):
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '2px' }}>Min:</span>
-                    <input
-                      type="number"
-                      value={houseAreaMin}
-                      onChange={(e) => {
-                        const numValue = parseInt(e.target.value) || 0;
-                        setHouseAreaMin(Math.min(numValue, houseAreaMax - 100));
-                      }}
-                      min="500"
-                      max="10000"
-                      style={{ width: '100px', padding: '4px', fontSize: '12px' }}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', display: 'block', marginBottom: '2px' }}>Max:</span>
-                    <input
-                      type="number"
-                      value={houseAreaMax}
-                      onChange={(e) => {
-                        const numValue = parseInt(e.target.value) || 0;
-                        setHouseAreaMax(Math.max(numValue, houseAreaMin + 100));
-                      }}
-                      min="500"
-                      max="10000"
-                      style={{ width: '100px', padding: '4px', fontSize: '12px' }}
-                    />
-                  </div>
-                </div>
               </label>
             </div>
           )}
@@ -580,9 +971,8 @@ function App() {
                 border: 'none',
                 borderRadius: '8px',
                 fontSize: '14px',
-                fontWeight: '500',
-                cursor: 'pointer',
-                marginTop: '20px'
+                fontWeight: 'bold',
+                cursor: 'pointer'
               }}
             >
               See my best investment options
