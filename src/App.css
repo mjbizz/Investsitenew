@@ -57,7 +57,7 @@ header p {
   grid-template-columns: 1fr 400px;
   gap: 0;
   align-items: stretch;
-  height: calc(100vh - 280px);
+  height: calc(100vh - 320px);
 }
 @media (max-width: 768px) {
   .content {
