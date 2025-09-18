@@ -1,0 +1,14 @@
+{
+  "files": {
+    "main.css": "/Investsitenew/static/css/main.6befd126.css",
+    "main.js": "/Investsitenew/static/js/main.0486cc5b.js",
+    "static/media/spritesheet.svg": "/Investsitenew/static/media/spritesheet.a4e0eb7ad904a4858361.svg",
+    "index.html": "/Investsitenew/index.html",
+    "main.6befd126.css.map": "/Investsitenew/static/css/main.6befd126.css.map",
+    "main.0486cc5b.js.map": "/Investsitenew/static/js/main.0486cc5b.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.6befd126.css",
+    "static/js/main.0486cc5b.js"
+  ]
+}
