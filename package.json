@@ -2,7 +2,7 @@
   "name": "realestate-investment-finder",
   "version": "1.0.0",
   "private": true,
-  "homepage": "https://mjbizz.github.io/Investsite/",
+  "homepage": "https://mjbizz.github.io/Investsitenew/",
   "dependencies": {
     "leaflet": "^1.9.4",
     "leaflet-control-geocoder": "^3.3.0",
