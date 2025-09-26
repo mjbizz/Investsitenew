@@ -11,16 +11,57 @@ export default function ZipPolygons({ selectedZips }) {
 
   // Fit bounds to all zip polygons when they change
   useEffect(() => {
-    const allBounds = zipObjects
-      .map(z => z.geojson)
-      .filter(Boolean)
-      .map(geojson => {
-        const coords = geojson.geometry.coordinates[0];
-        return coords.map(([lng, lat]) => [lat, lng]);
-      });
-    if (allBounds.length > 0) {
-      const flat = allBounds.flat();
-      map.fitBounds(flat);
+    try {
+      const validGeojsons = zipObjects
+        .map(z => z.geojson)
+        .filter(Boolean);
+        
+      if (validGeojsons.length > 0) {
+        // Calculate the overall bounding box
+        let minLat = Infinity, maxLat = -Infinity;
+        let minLng = Infinity, maxLng = -Infinity;
+        
+        validGeojsons.forEach(geojson => {
+          if (!geojson || !geojson.geometry || !geojson.geometry.coordinates) {
+            console.warn('Invalid geojson structure:', geojson);
+            return;
+          }
+          
+          let coords;
+          if (geojson.geometry.type === 'Polygon') {
+            coords = geojson.geometry.coordinates[0];
+          } else if (geojson.geometry.type === 'MultiPolygon') {
+            coords = geojson.geometry.coordinates[0][0];
+          } else {
+            console.warn('Unsupported geometry type:', geojson.geometry.type);
+            return;
+          }
+          
+          if (!Array.isArray(coords)) {
+            console.warn('Invalid coordinates structure:', coords);
+            return;
+          }
+          
+          coords.forEach(coord => {
+            if (Array.isArray(coord) && coord.length >= 2) {
+              const [lng, lat] = coord;
+              if (typeof lng === 'number' && typeof lat === 'number') {
+                minLat = Math.min(minLat, lat);
+                maxLat = Math.max(maxLat, lat);
+                minLng = Math.min(minLng, lng);
+                maxLng = Math.max(maxLng, lng);
+              }
+            }
+          });
+        });
+        
+        // Only fit bounds if we have valid coordinates
+        if (minLat !== Infinity && maxLat !== -Infinity && minLng !== Infinity && maxLng !== -Infinity) {
+          map.fitBounds([[minLat, minLng], [maxLat, maxLng]]);
+        }
+      }
+    } catch (error) {
+      console.error('Error fitting bounds:', error);
     }
   }, [zipObjects, map]);
 

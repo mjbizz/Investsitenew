@@ -8,11 +8,10 @@ import React, { useState, useRef } from "react";
 import { MapContainer, TileLayer, FeatureGroup, useMapEvents, useMap } from "react-leaflet";
 import ZipCodeBar from "./ZipCodeBar";
 import ZipPolygons from "./ZipPolygons";
-import BudgetRangeSlider from "./BudgetRangeSlider";
 import { findIntersectingZipCodes } from "./utils/geoUtils";
 import "./App.css";
 
-function MapSearchControl({ setIsDrawing }) {
+function MapSearchControl() {
   const map = useMap();
   React.useEffect(() => {
     if (!map || !window.L.Control.Geocoder) return;
@@ -34,17 +33,6 @@ function MapSearchControl({ setIsDrawing }) {
         ]);
         map.fitBounds(bounds);
       })
-      .on("expand", function() {
-        // Disable drawing when search is expanded
-        if (window.freehandDrawing) {
-          window.freehandDrawing = false;
-          map.dragging.enable();
-          map.getContainer().style.cursor = '';
-          // Reset drawing state in parent component
-          if (setIsDrawing) setIsDrawing(false);
-          console.log('Drawing disabled due to search expansion');
-        }
-      })
       .addTo(map);
     return () => {
       map.removeControl(geocoder);
@@ -53,8 +41,7 @@ function MapSearchControl({ setIsDrawing }) {
   return null;
 }
 
-
-function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing, setIsDrawing }) {
+function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing }) {
   const map = useMapEvents({
     click() {},
   });
@@ -79,7 +66,6 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing, setIsD
       const geoJson = e.layer.toGeoJSON();
       if (onBoundaryDrawn) onBoundaryDrawn(geoJson);
       
-      // Find intersecting zip codes
       try {
         console.log('Drawn polygon GeoJSON:', geoJson);
         const intersectingZips = await findIntersectingZipCodes(geoJson);
@@ -98,13 +84,6 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing, setIsD
     const handleMouseDown = (e) => {
       if (!window.freehandDrawing) return;
       
-      console.log('Drawing mousedown/touchstart triggered:', e.type);
-      
-      // Prevent default behavior for touch events to avoid page scrolling
-      if (e.originalEvent && e.originalEvent.preventDefault) {
-        e.originalEvent.preventDefault();
-      }
-      
       isDrawing = true;
       items.clearLayers();
       
@@ -113,46 +92,27 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing, setIsD
         weight: 4,
         opacity: 0.8
       }).addTo(items);
-      
-      console.log('Started drawing polyline at:', e.latlng);
     };
     
     const handleMouseMove = (e) => {
       if (!window.freehandDrawing || !isDrawing || !currentPolyline) return;
-      
-      // Prevent default behavior for touch events to avoid page scrolling
-      if (e.originalEvent && e.originalEvent.preventDefault) {
-        e.originalEvent.preventDefault();
-      }
-      
       currentPolyline.addLatLng(e.latlng);
-      // console.log('Drawing move, total points:', currentPolyline.getLatLngs().length);
     };
     
     const handleMouseUp = async (e) => {
-      console.log('Drawing mouseup/touchend triggered:', e.type);
       if (!window.freehandDrawing || !isDrawing || !currentPolyline) return;
       
-      // Add a small delay to prevent accidental button clicks
-      setTimeout(() => {
-        isDrawing = false;
-        window.freehandDrawing = false;
-        map.dragging.enable();
-        map.getContainer().style.cursor = '';
-        
-        // Reset drawing state in parent component
-        if (setIsDrawing) setIsDrawing(false);
-      }, 100);
+      isDrawing = false;
+      window.freehandDrawing = false;
+      map.dragging.enable();
+      map.getContainer().style.cursor = '';
       
       // Convert polyline to polygon for zip code detection
       const latlngs = currentPolyline.getLatLngs();
-      console.log('Drawing completed, polyline points:', latlngs.length);
-      
       if (latlngs.length > 2) {
-        // Close the polygon by adding the first point at the end
+        // Close the polygon
         latlngs.push(latlngs[0]);
         
-        // Create a polygon from the polyline
         const polygon = L.polygon(latlngs, {
           color: '#3388ff',
           weight: 4,
@@ -165,20 +125,16 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing, setIsD
         items.addLayer(polygon);
         
         const geoJson = polygon.toGeoJSON();
-        console.log('Polygon created, starting zip code search...');
         if (onBoundaryDrawn) onBoundaryDrawn(geoJson);
         
-        // Find intersecting zip codes
         try {
           console.log('Drawn freehand polygon GeoJSON:', geoJson);
-          console.log('About to call findIntersectingZipCodes...');
           const intersectingZips = await findIntersectingZipCodes(geoJson);
-          console.log('findIntersectingZipCodes returned:', intersectingZips);
+          console.log('Found intersecting zip codes:', intersectingZips);
           if (intersectingZips.length > 0 && onZipCodesFound) {
-            console.log('Calling onZipCodesFound with', intersectingZips.length, 'zip codes');
             onZipCodesFound(intersectingZips);
           } else {
-            console.log('No intersecting zip codes found, length:', intersectingZips.length);
+            console.log('No intersecting zip codes found');
           }
         } catch (error) {
           console.error('Error finding intersecting zip codes:', error);
@@ -189,38 +145,15 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing, setIsD
     };
     
     map.on(L.Draw.Event.CREATED, handleDrawCreated);
-    
-    // Add both mouse and touch event handlers for drawing
     map.on('mousedown', handleMouseDown);
     map.on('mousemove', handleMouseMove);
     map.on('mouseup', handleMouseUp);
-    
-    // Touch events for mobile support
-    map.on('touchstart', handleMouseDown);
-    map.on('touchmove', handleMouseMove);
-    map.on('touchend', handleMouseUp);
-    
-    // Additional touch event handling for better mobile support
-    map.getContainer().addEventListener('touchend', (e) => {
-      if (window.freehandDrawing && isDrawing) {
-        console.log('Container touchend detected');
-        // Create a synthetic event for handleMouseUp
-        const syntheticEvent = {
-          type: 'touchend',
-          latlng: map.mouseEventToLatLng(e.changedTouches[0])
-        };
-        handleMouseUp(syntheticEvent);
-      }
-    }, { passive: false });
     
     return () => {
       map.off(L.Draw.Event.CREATED, handleDrawCreated);
       map.off('mousedown', handleMouseDown);
       map.off('mousemove', handleMouseMove);
       map.off('mouseup', handleMouseUp);
-      map.off('touchstart', handleMouseDown);
-      map.off('touchmove', handleMouseMove);
-      map.off('touchend', handleMouseUp);
       if (map.hasLayer(items)) {
         map.removeLayer(items);
       }
@@ -229,8 +162,6 @@ function DrawBoundary({ onBoundaryDrawn, onZipCodesFound, onClearDrawing, setIsD
   
   return null;
 }
-
-
 
 // Generate year options with specified intervals
 const generateYearOptions = () => {
@@ -534,7 +465,7 @@ function AreaInput({ value, onChange, placeholder, style }) {
               onMouseEnter={(e) => e.target.style.backgroundColor = '#475569'}
               onMouseLeave={(e) => e.target.style.backgroundColor = inputValue === area ? '#475569' : 'transparent'}
             >
-              {area}
+              {area} sq ft
             </div>
           ))}
         </div>
@@ -546,24 +477,22 @@ function AreaInput({ value, onChange, placeholder, style }) {
 function App() {
   const [zipInput, setZipInput] = useState("");
   const [selectedZips, setSelectedZips] = useState([]); // [{zip, geojson, bounds}]
-  const [budgetMin, setBudgetMin] = useState(0);
-  const [budgetMax, setBudgetMax] = useState(1000000);
+  const [budgetMin, setBudgetMin] = useState("");
+  const [budgetMax, setBudgetMax] = useState("");
+  const [budgetMinInput, setBudgetMinInput] = useState("No min");
+  const [budgetMaxInput, setBudgetMaxInput] = useState("No max");
+  const [boundary, setBoundary] = useState(null);
+  const [showResults, setShowResults] = useState(false);
+  const [showDetailedOptions, setShowDetailedOptions] = useState(false);
   const [constructionYearMin, setConstructionYearMin] = useState("");
   const [constructionYearMax, setConstructionYearMax] = useState("");
   const [bedrooms, setBedrooms] = useState("any");
   const [houseAreaMin, setHouseAreaMin] = useState("");
   const [houseAreaMax, setHouseAreaMax] = useState("");
-  const [boundary, setBoundary] = useState(null);
-  const [showResults, setShowResults] = useState(false);
-  const [showDetailedOptions, setShowDetailedOptions] = useState(false);
-  const [activeSlider, setActiveSlider] = useState(null);
   const [showAllZips, setShowAllZips] = useState(false);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [showMap, setShowMap] = useState(false);
   
   const minSliderRef = useRef(null);
   const maxSliderRef = useRef(null);
-
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -583,19 +512,13 @@ function App() {
   };
 
   const handleZipCodesFound = (newZips) => {
-    console.log('handleZipCodesFound called with:', newZips);
     setSelectedZips(currentZips => {
       // Get existing zip codes for duplicate checking
       const existingZipCodes = new Set(currentZips.map(z => typeof z === 'string' ? z : z.zip));
       
-      // Filter out duplicates
-      const uniqueNewZips = newZips.filter(newZip => 
-        !existingZipCodes.has(newZip.zip)
-      );
+      // Filter out duplicates and add new zip objects
+      const uniqueNewZips = newZips.filter(z => !existingZipCodes.has(z.zip));
       
-      console.log('Adding unique new zips:', uniqueNewZips);
-      
-      // Add new zip codes to existing ones
       return [...currentZips, ...uniqueNewZips];
     });
   };
@@ -615,23 +538,319 @@ function App() {
     <div className="main-container">
       <header>
         <h1>Find the Best Investment Properties</h1>
-        <p className="header-description">Draw your area of interest or enter a zip code, and tell us your investment preferences.</p>
+        <p>Draw your area of interest or enter a zip code, and tell us your investment preferences.</p>
       </header>
       <div className="content">
+        <div className="map-section">
+          <div style={{ position: 'relative', height: '100%' }}>
+            <MapContainer
+              center={[35.2271, -80.8431]}
+              zoom={10}
+              style={{ height: "100%", width: "100%" }}
+              zoomControl={false}
+            >
+              <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" attribution="&copy; <a href='https://carto.com/attributions'>CARTO</a>" />
+              <MapSearchControl />
+              <ZipPolygons selectedZips={selectedZips} />
+              <FeatureGroup>{<DrawBoundary onBoundaryDrawn={setBoundary} onZipCodesFound={handleZipCodesFound} onClearDrawing={handleClearDrawing} />}</FeatureGroup>
+            </MapContainer>
+            
+            {/* Zip Code Search - Top Center */}
+            <div style={{ 
+              position: 'absolute', 
+              top: '10px', 
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 1000, 
+              display: 'flex', 
+              flexDirection: 'column', 
+              alignItems: 'center',
+              gap: '8px', 
+              width: '100%',
+              maxWidth: '300px',
+              padding: '0 10px',
+              boxSizing: 'border-box'
+            }}>
+              <ZipCodeBar
+                selectedZips={selectedZips}
+                setSelectedZips={setSelectedZips}
+                zipInput={zipInput}
+                setZipInput={setZipInput}
+              />
+              
+              {/* Selected Zip Codes Display */}
+              {selectedZips.length > 0 && (
+                <div className="zip-results-section" style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap', 
+                  gap: '6px', 
+                  justifyContent: 'center',
+                  marginTop: '8px',
+                  maxWidth: '100%',
+                  overflow: 'hidden'
+                }}>
+                  {(showAllZips ? selectedZips : selectedZips.slice(0, 3)).map((zip, index) => (
+                    <div
+                      key={typeof zip === 'string' ? zip : zip.zip}
+                      style={{
+                        backgroundColor: 'rgba(59, 130, 246, 0.9)',
+                        color: 'white',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        textAlign: 'center',
+                        width: '80px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <span>{typeof zip === 'string' ? zip : zip.zip}</span>
+                      <button
+                        onClick={() => {
+                          const zipCode = typeof zip === 'string' ? zip : zip.zip;
+                          setSelectedZips(zips => zips.filter(z => (typeof z === 'string' ? z : z.zip) !== zipCode));
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'white',
+                          cursor: 'pointer',
+                          fontSize: '14px',
+                          fontWeight: 'bold',
+                          padding: '0',
+                          width: '16px',
+                          height: '16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: '50%',
+                          backgroundColor: 'rgba(255, 255, 255, 0.2)'
+                        }}
+                        onMouseOver={(e) => e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.3)'}
+                        onMouseOut={(e) => e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.2)'}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {selectedZips.length > 3 && (
+                    <div
+                      onClick={() => setShowAllZips(!showAllZips)}
+                      style={{
+                        backgroundColor: 'rgba(100, 116, 139, 0.9)',
+                        color: 'white',
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        textAlign: 'center',
+                        minWidth: '60px',
+                        cursor: 'pointer'
+                      }}
+                      onMouseOver={(e) => e.target.style.backgroundColor = 'rgba(100, 116, 139, 1)'}
+                      onMouseOut={(e) => e.target.style.backgroundColor = 'rgba(100, 116, 139, 0.9)'}
+                    >
+                      {showAllZips ? 'Show less' : `+${selectedZips.length - 3} more`}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            
+            {/* Zoom Controls - Top Left (below search) */}
+            <div style={{ position: 'absolute', top: '60px', left: '10px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <button 
+                onClick={() => {
+                  console.log('Zoom in clicked, mapInstance:', window.mapInstance);
+                  if (window.mapInstance) {
+                    window.mapInstance.zoomIn();
+                    console.log('Zoom in executed');
+                  } else {
+                    console.log('No mapInstance found');
+                  }
+                }}
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  backgroundColor: 'white',
+                  border: '2px solid rgba(0,0,0,0.2)',
+                  borderRadius: '4px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >+</button>
+              <button 
+                onClick={() => {
+                  if (window.mapInstance) {
+                    window.mapInstance.zoomOut();
+                  }
+                }}
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  backgroundColor: 'white',
+                  border: '2px solid rgba(0,0,0,0.2)',
+                  borderRadius: '4px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >−</button>
+            </div>
+            
+            {/* Drawing Tools - Below Zoom Controls */}
+            <div style={{ position: 'absolute', top: '140px', left: '10px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <button 
+                onClick={() => {
+                  if (window.mapInstance) {
+                    // Enable freehand drawing mode
+                    window.freehandDrawing = true;
+                    window.mapInstance.dragging.disable();
+                    window.mapInstance.getContainer().style.cursor = 'crosshair';
+                  }
+                }}
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  backgroundColor: 'white',
+                  border: '2px solid rgba(0,0,0,0.2)',
+                  borderRadius: '4px',
+                  fontSize: '16px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#333'
+                }}
+                title="Free Hand Draw"
+              >✏️</button>
+            </div>
+            
+            {/* Clear Boundary Button - Bottom Left (only when zip codes selected) */}
+            {selectedZips.length > 0 && (
+              <div style={{ position: 'absolute', bottom: '10px', left: '10px', zIndex: 1000 }}>
+                <button 
+                  onClick={handleClearDrawing}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#dc3545',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                  }}
+                  title="Clear selected zip codes and boundary"
+                >
+                  Clear Boundary
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
         <form className="prefs-form" onSubmit={handleSubmit}>
           <label>
             Budget Range:
-            <BudgetRangeSlider
-              minValue={0}
-              maxValue={1000000}
-              step={10000}
-              currentMin={budgetMin}
-              currentMax={budgetMax}
-              onRangeChange={({ min, max }) => {
-                setBudgetMin(min);
-                setBudgetMax(max);
-              }}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <input
+                type="text"
+                value={budgetMinInput}
+                onChange={(e) => {
+                  const rawValue = e.target.value;
+                  setBudgetMinInput(rawValue);
+                  
+                  // Parse the number for validation
+                  const numValue = parseInt(rawValue.replace(/[^0-9]/g, '')) || 0;
+                  if (numValue > 0) {
+                    setBudgetMin(numValue);
+                  } else if (rawValue === "") {
+                    setBudgetMin("");
+                  }
+                }}
+                onFocus={() => {
+                  if (budgetMinInput === "No min") {
+                    setBudgetMinInput("");
+                  }
+                }}
+                onBlur={() => {
+                  if (!budgetMinInput || budgetMinInput === "") {
+                    setBudgetMinInput("No min");
+                    setBudgetMin("");
+                  } else {
+                    const numValue = parseInt(budgetMinInput.replace(/[^0-9]/g, '')) || 0;
+                    if (numValue > 0) {
+                      setBudgetMin(numValue);
+                      setBudgetMinInput(numValue.toLocaleString());
+                    } else {
+                      setBudgetMinInput("No min");
+                      setBudgetMin("");
+                    }
+                  }
+                }}
+                style={{ 
+                  width: '170px', 
+                  padding: '4px', 
+                  fontSize: '12px',
+                  color: budgetMinInput === "No min" ? '#94a3b8' : '#e2e8f0'
+                }}
+              />
+              <span style={{ color: '#e2e8f0', fontSize: '12px' }}>-</span>
+              <input
+                type="text"
+                value={budgetMaxInput}
+                onChange={(e) => {
+                  const rawValue = e.target.value;
+                  setBudgetMaxInput(rawValue);
+                  
+                  // Parse the number for validation
+                  const numValue = parseInt(rawValue.replace(/[^0-9]/g, '')) || 0;
+                  if (numValue > 0) {
+                    setBudgetMax(numValue);
+                  } else if (rawValue === "") {
+                    setBudgetMax("");
+                  }
+                }}
+                onFocus={() => {
+                  if (budgetMaxInput === "No max") {
+                    setBudgetMaxInput("");
+                  }
+                }}
+                onBlur={() => {
+                  if (!budgetMaxInput || budgetMaxInput === "") {
+                    setBudgetMaxInput("No max");
+                    setBudgetMax("");
+                  } else {
+                    const numValue = parseInt(budgetMaxInput.replace(/[^0-9]/g, '')) || 0;
+                    if (numValue > 0) {
+                      setBudgetMax(numValue);
+                      setBudgetMaxInput(numValue.toLocaleString());
+                    } else {
+                      setBudgetMaxInput("No max");
+                      setBudgetMax("");
+                    }
+                  }
+                }}
+                style={{ 
+                  width: '170px', 
+                  padding: '4px', 
+                  fontSize: '12px',
+                  color: budgetMaxInput === "No max" ? '#94a3b8' : '#e2e8f0'
+                }}
+              />
+            </div>
           </label>
           <label>
             Investment Horizon:
@@ -667,27 +886,7 @@ function App() {
               cursor: 'pointer'
             }}
           >
-            {showDetailedOptions ? 'Use smart defaults' : 'Add more details'}
-          </button>
-
-          {/* Open Map button - mobile only */}
-          <button 
-            type="button"
-            onClick={() => setShowMap(!showMap)}
-            className="open-map-btn"
-            style={{
-              width: '100%',
-              padding: '12px 16px',
-              backgroundColor: showMap ? '#10b981' : '#6366f1',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-          >
-            {showMap ? 'Close Map' : 'Open Map'}
+            {showDetailedOptions ? 'Use smart defaults' : 'I want to add more details'}
           </button>
 
           {/* Show best options button - appears when details are hidden */}
@@ -793,188 +992,6 @@ function App() {
             </button>
           )}
         </form>
-        <div className={`map-section ${showMap ? 'mobile-visible' : 'mobile-hidden'}`}>
-          <div style={{ position: 'relative', height: '100%' }}>
-            <MapContainer
-              center={[35.2271, -80.8431]}
-              zoom={10}
-              style={{ height: "100%", width: "100%" }}
-              zoomControl={false}
-            >
-              <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" attribution="&copy; <a href='https://carto.com/attributions'>CARTO</a>" />
-              <MapSearchControl setIsDrawing={setIsDrawing} />
-              <ZipPolygons selectedZips={selectedZips} />
-              <FeatureGroup>{<DrawBoundary onBoundaryDrawn={setBoundary} onZipCodesFound={handleZipCodesFound} onClearDrawing={handleClearDrawing} setIsDrawing={setIsDrawing} />}</FeatureGroup>
-            </MapContainer>
-            
-            {/* Zip Code Search - Top Right */}
-            <div style={{ 
-              position: 'absolute', 
-              top: '10px', 
-              right: '10px', 
-              zIndex: 1000, 
-              display: 'flex', 
-              flexDirection: 'column', 
-              gap: '2px' 
-            }}>
-              <ZipCodeBar
-                selectedZips={selectedZips}
-                setSelectedZips={setSelectedZips}
-                zipInput={zipInput}
-                setZipInput={setZipInput}
-                showAllZips={showAllZips}
-                setShowAllZips={setShowAllZips}
-              />
-            </div>
-            
-            {/* Zoom Controls - Top Left (below search) */}
-            <div style={{ position: 'absolute', top: '50px', left: '10px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <button 
-                onClick={() => {
-                  console.log('NEW: Zoom in clicked, mapInstance:', window.mapInstance);
-                  if (window.mapInstance) {
-                    window.mapInstance.zoomIn();
-                    console.log('NEW: Zoom in executed');
-                  } else {
-                    console.log('NEW: No mapInstance found');
-                  }
-                }}
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  backgroundColor: 'white',
-                  border: '2px solid rgba(0,0,0,0.2)',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  touchAction: 'manipulation'
-                }}
-              >+</button>
-              <button 
-                onClick={() => {
-                  if (window.mapInstance) {
-                    window.mapInstance.zoomOut();
-                  }
-                }}
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  backgroundColor: 'white',
-                  border: '2px solid rgba(0,0,0,0.2)',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  touchAction: 'manipulation'
-                }}
-              >−</button>
-            </div>
-            
-            {/* Drawing Tools - Below Zoom Controls */}
-            <div style={{ position: 'absolute', top: '130px', left: '10px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '5px' }}>
-              <button 
-                onClick={() => {
-                  console.log('Draw button clicked, current isDrawing:', isDrawing);
-                  if (window.mapInstance) {
-                    if (!isDrawing) {
-                      // Enable freehand drawing mode
-                      window.freehandDrawing = true;
-                      window.mapInstance.dragging.disable();
-                      window.mapInstance.getContainer().style.cursor = 'crosshair';
-                      setIsDrawing(true);
-                      console.log('Drawing mode enabled, freehandDrawing:', window.freehandDrawing);
-                    } else {
-                      // Disable drawing mode
-                      window.freehandDrawing = false;
-                      window.mapInstance.dragging.enable();
-                      window.mapInstance.getContainer().style.cursor = '';
-                      setIsDrawing(false);
-                      console.log('Drawing mode disabled');
-                    }
-                  } else {
-                    console.log('No map instance found');
-                  }
-                }}
-                style={{
-                  width: '34px',
-                  height: '34px',
-                  backgroundColor: isDrawing ? '#3b82f6' : 'white',
-                  border: '2px solid rgba(0,0,0,0.2)',
-                  borderRadius: '4px',
-                  fontSize: '16px',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: isDrawing ? 'white' : '#333',
-                  touchAction: 'manipulation'
-                }}
-                title="Free Hand Draw"
-              >✏️</button>
-            </div>
-            
-            {/* Drawing Instruction Message - Top Center */}
-            {isDrawing && (
-              <div style={{ 
-                position: 'absolute', 
-                top: '10px',
-                left: window.innerWidth <= 768 ? '54px' : '50%',
-                right: window.innerWidth <= 768 ? '170px' : 'auto',
-                transform: window.innerWidth <= 768 ? 'none' : 'translateX(-50%)',
-                zIndex: 1000,
-                backgroundColor: 'rgba(59, 130, 246, 0.95)',
-                color: 'white',
-                padding: window.innerWidth <= 768 ? '6px 12px' : '0 16px',
-                borderRadius: window.innerWidth <= 768 ? '6px' : '4px',
-                fontSize: window.innerWidth <= 768 ? '10px' : '12px',
-                fontWeight: '500',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                textAlign: 'center',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: window.innerWidth <= 768 ? '22px' : '34px',
-                whiteSpace: 'nowrap',
-                width: window.innerWidth <= 768 ? 'auto' : 'fit-content'
-              }}>
-                {window.innerWidth <= 768 ? 'Touch and drag to draw area' : 'Click and drag to draw your search area'}
-              </div>
-            )}
-            
-            {/* Clear Boundary Button - Bottom Left (only when zip codes selected) */}
-            {selectedZips.length > 0 && (
-              <div style={{ position: 'absolute', bottom: '10px', left: '10px', zIndex: 1000 }}>
-                <button 
-                  onClick={handleClearDrawing}
-                  style={{
-                    padding: '4px 8px',
-                    backgroundColor: '#dc3545',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
-                    height: '24px',
-                    touchAction: 'manipulation'
-                  }}
-                  title="Clear selected zip codes and boundary"
-                >
-                  Clear Boundary
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
       </div>
       {showResults && (
         <section className="results-placeholder">
