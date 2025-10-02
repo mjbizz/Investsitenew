@@ -4,14 +4,14 @@
   "private": true,
   "homepage": "https://mjbizz.github.io/Investsitenew/",
   "dependencies": {
+    "ipaddr.js": "^2.2.0",
     "leaflet": "^1.9.4",
     "leaflet-control-geocoder": "^3.3.0",
     "leaflet-draw": "^1.0.4",
     "leaflet-easybutton": "^2.4.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-leaflet": "^4.2.1",
-    "react-scripts": "5.0.1"
+    "react-leaflet": "^4.2.1"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -34,6 +34,8 @@
     ]
   },
   "devDependencies": {
-    "gh-pages": "^6.3.0"
+    "gh-pages": "^6.3.0",
+    "react-scripts": "^5.0.1",
+    "web-vitals": "^5.1.0"
   }
 }

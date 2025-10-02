@@ -16,14 +16,22 @@ const BudgetRangeSlider = ({
   const minHandleRef = useRef(null);
   const maxHandleRef = useRef(null);
   const lastUpdateTime = useRef(0);
+  const minRef = useRef(min);
+  const maxRef = useRef(max);
 
-  // Update internal state when props change (but only if they're different and we're not dragging)
+  // Update internal state when props change (but only if we're not dragging)
   useEffect(() => {
-    if (!isDraggingRef.current && (min !== currentMin || max !== currentMax)) {
+    if (!isDraggingRef.current) {
       setMin(currentMin);
       setMax(currentMax);
     }
-  }, [currentMin, currentMax, min, max]);
+  }, [currentMin, currentMax]);
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    minRef.current = min;
+    maxRef.current = max;
+  }, [min, max]);
 
   const formatCurrency = (value) => {
     if (value === minValue) return 'No min';
@@ -42,15 +50,10 @@ const BudgetRangeSlider = ({
     let percentage = ((clientX - rect.left) / rect.width) * 100;
     percentage = Math.max(0, Math.min(100, percentage)); // Clamp between 0-100
     
-    // Calculate the exact value without rounding for smoother dragging
+    // Calculate the exact value
     const exactValue = minValue + (percentage / 100) * (maxValue - minValue);
     
-    // Only round to the nearest step when not dragging for better precision
-    if (!isDraggingRef.current) {
-      return Math.round(exactValue / step) * step;
-    }
-    
-    // When dragging, return the exact value for smoother movement
+    // Always return the exact value for smooth dragging
     return exactValue;
   };
 
@@ -60,6 +63,21 @@ const BudgetRangeSlider = ({
     e.stopPropagation();
     updateValue(e.clientX);
   };
+
+  // Define updateValue first before other functions that use it
+  const updateValue = useCallback((clientX) => {
+    if (!isDraggingRef.current) return;
+    
+    const newValue = getValueFromPosition(clientX);
+    
+    if (isDraggingRef.current === 'min') {
+      const clampedValue = Math.min(Math.max(minValue, newValue), maxRef.current - step);
+      setMin(clampedValue);
+    } else if (isDraggingRef.current === 'max') {
+      const clampedValue = Math.max(Math.min(maxValue, newValue), minRef.current + step);
+      setMax(clampedValue);
+    }
+  }, [minValue, maxValue, step]);
 
   const handleMouseDown = (e, type) => {
     e.preventDefault();
@@ -79,13 +97,11 @@ const BudgetRangeSlider = ({
     e.preventDefault();
     e.stopPropagation();
     
-    // Use requestAnimationFrame for smoother updates
-    requestAnimationFrame(() => {
-      if (e.touches && e.touches[0]) {
-        updateValue(e.touches[0].clientX);
-      }
-    });
-  }, []); // Removed updateValue from dependencies to avoid circular dependency
+    // Direct update without requestAnimationFrame to avoid double RAF
+    if (e.touches && e.touches[0]) {
+      updateValue(e.touches[0].clientX);
+    }
+  }, [updateValue]);
 
   const preventSelection = useCallback((e) => {
     e.preventDefault();
@@ -114,33 +130,6 @@ const BudgetRangeSlider = ({
     };
   }, []);
 
-  const updateValue = useCallback((clientX) => {
-    if (!isDraggingRef.current) return;
-    
-    // Use requestAnimationFrame for smoother updates
-    requestAnimationFrame(() => {
-      const newValue = getValueFromPosition(clientX);
-      
-      if (isDraggingRef.current === 'min') {
-        setMin(prevMin => {
-          // Only update if the change is significant enough (at least 1/10th of the step)
-          if (Math.abs(newValue - prevMin) >= step / 10) {
-            return Math.min(Math.max(minValue, newValue), max - step);
-          }
-          return prevMin;
-        });
-      } else if (isDraggingRef.current === 'max') {
-        setMax(prevMax => {
-          // Only update if the change is significant enough (at least 1/10th of the step)
-          if (Math.abs(newValue - prevMax) >= step / 10) {
-            return Math.max(Math.min(maxValue, newValue), min + step);
-          }
-          return prevMax;
-        });
-      }
-    });
-  }, [min, max, minValue, maxValue, step, getValueFromPosition]);
-
   // Handle touch end events
   const handleTouchEnd = useCallback(() => {
     if (!isDraggingRef.current) return;
@@ -168,14 +157,14 @@ const BudgetRangeSlider = ({
     document.removeEventListener('mouseup', handleMouseUp);
     document.removeEventListener('selectstart', preventSelection);
     
-    // Call the callback with final values
+    // Call the callback with final values using refs to avoid dependency issues
     if (onRangeChange) {
       onRangeChange({
-        min: min,
-        max: max
+        min: minRef.current,
+        max: maxRef.current
       });
     }
-  }, [handleMouseMove, onRangeChange, min, max, preventSelection]);
+  }, [handleMouseMove, onRangeChange, preventSelection]);
   
   // Helper function to handle touch start
   const handleTouchStart = useCallback((e, type) => {
@@ -200,16 +189,16 @@ const BudgetRangeSlider = ({
     const percent = x / rect.width;
     const value = minValue + percent * (maxValue - minValue);
     
-    // Determine which handle is closer
-    const minDist = Math.abs(value - min);
-    const maxDist = Math.abs(value - max);
+    // Determine which handle is closer using refs to avoid dependency issues
+    const minDist = Math.abs(value - minRef.current);
+    const maxDist = Math.abs(value - maxRef.current);
     
     const type = minDist < maxDist ? 'min' : 'max';
     handleTouchStart(e, type);
     
     // Update the value immediately
     updateValue(e.touches[0].clientX);
-  }, [min, max, minValue, maxValue, handleTouchStart, updateValue]);
+  }, [minValue, maxValue, handleTouchStart, updateValue]);
 
   // Add direct DOM touch event listeners to avoid passive event issues
   useEffect(() => {
@@ -217,12 +206,16 @@ const BudgetRangeSlider = ({
     const maxHandle = maxHandleRef.current;
     const slider = sliderRef.current;
 
+    // Create handler functions that can be properly removed
+    const minTouchHandler = (e) => handleTouchStart(e, 'min');
+    const maxTouchHandler = (e) => handleTouchStart(e, 'max');
+
     // Add touch event listeners
     if (minHandle) {
-      minHandle.addEventListener('touchstart', (e) => handleTouchStart(e, 'min'), { passive: false });
+      minHandle.addEventListener('touchstart', minTouchHandler, { passive: false });
     }
     if (maxHandle) {
-      maxHandle.addEventListener('touchstart', (e) => handleTouchStart(e, 'max'), { passive: false });
+      maxHandle.addEventListener('touchstart', maxTouchHandler, { passive: false });
     }
     if (slider) {
       slider.addEventListener('touchstart', handleSliderTouchStart, { passive: false });
@@ -231,10 +224,10 @@ const BudgetRangeSlider = ({
     // Cleanup function
     return () => {
       if (minHandle) {
-        minHandle.removeEventListener('touchstart', (e) => handleTouchStart(e, 'min'));
+        minHandle.removeEventListener('touchstart', minTouchHandler);
       }
       if (maxHandle) {
-        maxHandle.removeEventListener('touchstart', (e) => handleTouchStart(e, 'max'));
+        maxHandle.removeEventListener('touchstart', maxTouchHandler);
       }
       if (slider) {
         slider.removeEventListener('touchstart', handleSliderTouchStart);
@@ -252,24 +245,24 @@ const BudgetRangeSlider = ({
     if (isDragging) return;
     
     const newValue = getValueFromPosition(e.clientX);
-    const minDistance = Math.abs(newValue - min);
-    const maxDistance = Math.abs(newValue - max);
+    const minDistance = Math.abs(newValue - minRef.current);
+    const maxDistance = Math.abs(newValue - maxRef.current);
     
     if (minDistance < maxDistance) {
-      const newMin = Math.max(minValue, Math.min(newValue, max - step));
+      const newMin = Math.max(minValue, Math.min(newValue, maxRef.current - step));
       setMin(newMin);
       if (onRangeChange) {
         onRangeChange({
           min: newMin,
-          max: max
+          max: maxRef.current
         });
       }
     } else {
-      const newMax = Math.min(maxValue, Math.max(newValue, min + step));
+      const newMax = Math.min(maxValue, Math.max(newValue, minRef.current + step));
       setMax(newMax);
       if (onRangeChange) {
         onRangeChange({
-          min: min,
+          min: minRef.current,
           max: newMax
         });
       }
