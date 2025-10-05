@@ -69,7 +69,7 @@ export default function ZipPolygons({ selectedZips }) {
     <>
       {zipObjects.map(({ zip, geojson }) =>
         geojson ? (
-          <GeoJSON key={zip} data={geojson} style={{ color: '#3b82f6', weight: 2, fillOpacity: 0.2 }} />
+          <GeoJSON key={zip} data={geojson} style={{ color: '#00ff9d', weight: 3, fillOpacity: 0.3, fillColor: '#00ff9d' }} />
         ) : null
       )}
     </>
